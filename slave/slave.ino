@@ -1,29 +1,50 @@
 #include <Wire.h>
+int waterValue = 0;
+int fireValue = 0;
+int exhaustValue = 0;
 
 void setup() {
- Wire.begin(8);                /* join i2c bus with address 8 */
- Wire.onReceive(receiveEvent); /* register receive event */
- Wire.onRequest(requestEvent); /* register request event */
- Serial.begin(9600);           /* start serial comm. */
- Serial.println("I am I2C Slave");
+  Wire.begin(8);                /* join i2c bus with address 8 */
+  Wire.onReceive(receiveEvent); /* register receive event */
+  Wire.onRequest(requestEvent); /* register request event */
+  Serial.begin(9600);           /* start serial comm. */
+  Serial.println("I am I2C Slave");
 }
 
 void loop() {
- delay(100);
+  delay(100);
 }
 
-// function that executes whenever data is received from master
 void receiveEvent(int howMany) {
- while (0 <Wire.available()) {
-    byte high = Wire.read();     /* receive byte as a character */
+
+  int val = 0;
+  while (1 < Wire.available()) {
+    byte high = Wire.read();
     byte low = Wire.read();
-    int val = word(high, low);
-    Serial.println(val);           /* print the character */
+    val = word(high, low);
+    char type = Wire.read();
+    String typeString = String(type);
+    if (typeString == "w") {
+      waterValue = val;
+    } else if (typeString == "f") {
+      fireValue = val;
+    }
+    else if (typeString == "e") {
+      exhaustValue = val;
+    } else {
+      hasStatus(typeString);
+    }
+    
   }
- Serial.println();             /* to newline */
+  Serial.println(exhaustValue);
+  Serial.println(fireValue);
+  Serial.println(waterValue);
 }
 
-// function that executes whenever data is requested from master
+void hasStatus(String status) {
+  Serial.println(status);
+}
+
 void requestEvent() {
  Wire.write("Hi Master");  /*send string on request */
 }
