@@ -2,14 +2,14 @@
 #include <Wire.h>
 #include <arduino-timer.h>
 
-unsigned long previousMillis[5] = { 0, 0, 0, 0, 0 };//number of onOfftimers
-bool state[5] = { 0, 0, 0, 0, 0 };//number of onOfftimers
+unsigned long previousMillis[5] = { 0, 0, 0, 0, 0 };  //number of onOfftimers
+bool state[5] = { 0, 0, 0, 0, 0 };                    //number of onOfftimers
 auto timer = timer_create_default();
 float fireValue = 0;
 float exhaustValue = 0;
 float waterValue = 0;
 int status = 0;
-
+byte x = 0;
 void setup() {
   Serial.begin(9600);
   pinMode(12, OUTPUT);
@@ -21,14 +21,8 @@ void setup() {
 
 void loop() {
   // timer.tick();
-  onOffTimer(12, 2, 1, 2);
-  onOffTimer(11, 3, 1, 2);
-  // Wire.requestFrom(8, 9); /* request & read data of size 9 from slave */
-  // while (Wire.available()) {
-  //   char c = Wire.read(); /* read data received from slave */
-  //   Serial.print(c);
-  // }
-  // Serial.println();
+  requestDataFromSlave();
+  delay(500);
 }
 
 void onOffTimer(int relayPin, int i, int long onTime, long offTime) {
@@ -46,6 +40,19 @@ void onOffTimer(int relayPin, int i, int long onTime, long offTime) {
   }
 }
 
+void requestDataFromSlave() {
+  Wire.requestFrom(8, 1); /* request & read data of size 9 from slave */
+  int bytes = Wire.available();
+  Serial.print("Slave sent ");
+  Serial.print(bytes);
+  Serial.print(" of information\n");
+  for (int i = 0; i < bytes; i++) {
+    x = Wire.read();
+    Serial.print("Slave Sent: ");
+    Serial.print(x);
+    Serial.println();
+  }
+}
 void transmitData() {
   Wire.beginTransmission(8); /* begin with device address 8 */
   sendDataToSlave("w", waterValue);
