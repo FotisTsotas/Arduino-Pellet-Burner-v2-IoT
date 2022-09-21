@@ -1,16 +1,16 @@
-#include <LiquidCrystal.h>
-
 #include <Wire.h>
+#include <avr/wdt.h>
 #include <arduino-timer.h>
 #include <EEPROM.h>
 #include <max6675.h>
 #include <DallasTemperature.h>
+#include <LCD.h>
 #include <LiquidCrystal_I2C.h>
 #include <LiquidCrystal_SI2C.h>
 #define ONE_WIRE_BUS 5
 const int flameSensor = A0;
 const int voltageSensor = A2;
-const int motorAir = 1;
+const int motorAir = 4;
 const int beginResistor = 2;
 const int motorPellet = 6;
 const int onOffTimmers = 7;
@@ -20,6 +20,8 @@ int ktcCS = 9;
 int ktcCLK = 10;
 int volt = 0;
 int status = 0;
+int endTime = 2;
+int time = 0;
 float vOUT = 0.0;
 float vIN = 0.0;
 float R1 = 30000.0;
@@ -29,16 +31,18 @@ float exhaustValue = 0;
 float waterValue = 0;
 float firePerCent;
 unsigned long previousMillis[5] = { 0, 0, 0, 0, 0 };  //number of onOfftimers
+unsigned long previousTime = 0;
 unsigned long pelletInDelayLastTime = 0;
 unsigned long pelletInDelay = 10000;
+unsigned long preTime = 0;
 bool state[5] = { 0, 0, 0, 0, 0 };
 auto timer = timer_create_default();
 bool open = false;
 bool ignition = false;
 bool manual = true;
 bool menu = false;
-
-
+bool error = false;
+bool pellet = false;
 
 MAX6675 ktc(ktcCLK, ktcCS, ktcSO);
 LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
@@ -58,6 +62,10 @@ void setup() {
   Wire.onReceive(receiveEvent);
   Wire.onRequest(requestEvent);
   Serial.begin(9600);
+  wdt_enable(WDTO_2S);
+  // while (EEPROM.read(0) == 0) {  //need reset button
+  //   errorOn();
+  // }
 }
 
 void loop() {
@@ -71,30 +79,103 @@ void loop() {
 }
 
 void mainMode() {
-  if (!ignition) {
+  if (!ignition && !pellet && (exhaustValue < 35 || fireValue > 900)) {  // ktc.readCelsius() <= 25
     pelletIn();
   } else {
-    mainWorking();
+    started();
   }
 }
 
+
+void started() {
+  if ((fireValue >= 500) && exhaustValue <= 25)  // ktc.readCelsius() <= 25
+  {
+    preFlameOperation();
+  } else {
+    unsigned long currentTime = millis();
+    if (millis() - previousMillis[5] >= 1000) {
+      ignition = true;
+      time++;
+      if () {
+        lowFire();
+      } else if {
+        warmingUp();
+      } else {
+        mainWorking();
+      }
+
+      previousTime = currentTime;
+      wdt_reset();
+    }
+  }
+}
+
+void preFlameOperation() {
+  unsigned long currentTime = millis();
+  if (millis() - previousTime >= 1000) {
+    ignition = false;
+    time++;
+    if (time >= 14 && time <= 15) {
+      relay(0, 0, 1, 1);
+      lcd.clear();
+      lcd.setCursor(0, 1);
+      lcd.print("AERAS ANOIXTOS 1");
+    } else if (time >= 18 && time <= 20) {
+      relay(0, 0, 1, 1);
+      lcd.clear();
+      lcd.setCursor(0, 1);
+      lcd.print("AERAS ANOIXTOS 2");
+    } else if (time >= 25 && time <= 30) {
+      relay(0, 0, 1, 1);
+      lcd.clear();
+      lcd.setCursor(0, 1);
+      lcd.print("AERAS ANOIXTOS");
+    } else if (time > 40) {
+      relay(1, 1, 1, 1);
+      errorOn();
+    } else {
+      relay(1, 0, 1, 1);
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("ANAFLEKSI ");
+      lcd.print(time);
+      lcd.print(" sec");
+      lcd.setCursor(0, 1);
+      lcd.print("FOTIA ");
+      lcd.print(fireValue);
+    }
+    previousTime = currentTime;
+    wdt_reset();
+  }
+}
+
+void errorOn() {
+  lcd.clear();
+  lcd.setCursor(4, 1);
+  lcd.print("PROVLIMA");  //ERROR
+  digitalWrite(buzz, HIGH);
+  delay(500);
+  digitalWrite(buzz, LOW);
+  delay(500);
+}
+
 void pelletIn() {
-  if ((millis() - pelletInDelayLastTime) > pelletInDelay) {
+  while (endTime >= 0) {
     relay(1, 1, 0, 1);
-    timeOn = round(millis() - pelletInDelayLastTime) / 1000)
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("EISAGWGI PELLET");
     lcd.setCursor(0, 1);
-    lcd.print(timeOn);
+    lcd.print(endTime);
     lcd.print(" sec");
+    endTime--;
+    EEPROM.write(0, 0);
+    delay(1000);
+    wdt_reset();
   }
-  pelletInDelayLastTime = millis();
+  pellet = true;
+  EEPROM.write(0, 1);
 }
-
-void mainWorking() {
-}
-
 void closed() {
 }
 
@@ -102,17 +183,24 @@ void menuMode() {
 }
 
 void collectDataFromSensors() {
-  sensors.requestTemperatures();
-  waterValue = sensors.getTempCByIndex(0);
-  exhaustValue = analogRead(A1);  // tha mpei o  aisthtiras kausaeriwn
-  fireValue = analogRead(flameSensor);
-  volt = analogRead(voltageSensor);
-  vOUT = (volt * 5.0) / 1024.0;
-  vIN = vOUT / (R2 / (R1 + R2));
-  if (vIN > 12) {
-    open = true;
-  } else {
-    open = false;
+  unsigned long currentTime = millis();
+  if (millis() - preTime >= 1000) {
+    sensors.requestTemperatures();
+    waterValue = sensors.getTempCByIndex(0);
+    exhaustValue = analogRead(A1);  // tha mpei o  aisthtiras kausaeriwn
+    fireValue = analogRead(flameSensor);
+    volt = analogRead(voltageSensor);
+    vOUT = (volt * 5.0) / 1024.0;
+    vIN = vOUT / (R2 / (R1 + R2));
+    if (vIN > 12) {
+      open = true;
+    } else {
+      open = false;
+    }
+    Serial.println(fireValue);
+    Serial.println(exhaustValue);
+    preTime = currentTime;
+    wdt_reset();
   }
 }
 
