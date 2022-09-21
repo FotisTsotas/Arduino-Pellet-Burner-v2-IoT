@@ -30,19 +30,19 @@ float fireValue = 0;
 float exhaustValue = 0;
 float waterValue = 0;
 float firePerCent;
-unsigned long previousMillis[5] = { 0, 0, 0, 0, 0 };  //number of onOfftimers
+unsigned long previousMillis[10] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };  //number of onOfftimers
 unsigned long previousTime = 0;
 unsigned long pelletInDelayLastTime = 0;
 unsigned long pelletInDelay = 10000;
 unsigned long preTime = 0;
-bool state[5] = { 0, 0, 0, 0, 0 };
+bool state[10] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 auto timer = timer_create_default();
 bool open = false;
-bool ignition = false;
-bool manual = true;
+bool manual = false;
 bool menu = false;
 bool error = false;
 bool pellet = false;
+bool MAX = true;
 
 MAX6675 ktc(ktcCLK, ktcCS, ktcSO);
 LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
@@ -79,7 +79,7 @@ void loop() {
 }
 
 void mainMode() {
-  if (!ignition && !pellet && (exhaustValue < 35 || fireValue > 900)) {  // ktc.readCelsius() <= 25
+  if (!pellet && (exhaustValue < 35 || fireValue > 900)) {  // ktc.readCelsius() <= 25
     pelletIn();
   } else {
     started();
@@ -88,32 +88,81 @@ void mainMode() {
 
 
 void started() {
-  if ((fireValue >= 500) && exhaustValue <= 25)  // ktc.readCelsius() <= 25
-  {
+  if ((fireValue >= 500) && exhaustValue <= 25) {  // ktc.readCelsius() <= 25
+
     preFlameOperation();
   } else {
     unsigned long currentTime = millis();
-    if (millis() - previousMillis[5] >= 1000) {
-      ignition = true;
+    if (millis() - previousMillis[5] >= 1000) {  //i = 5
       time++;
-      if () {
+      while (fireValue > 900) {
+        errorOn();
+      }
+      if (exhaustValue >= 0 && exhaustValue <= 30) {  //ktc.readCelsius() >= 0 && ktc.readCelsius() <= 30
         lowFire();
-      } else if {
+      } else if (exhaustValue > 30 && exhaustValue < 65) {  //(ktc.readCelsius() > 30 && ktc.readCelsius() < 65)
         warmingUp();
-      } else {
+      } else if (exhaustValue >= 65) {  //ktc.readCelsius() < 65
         mainWorking();
       }
-
-      previousTime = currentTime;
+      previousMillis[5] = currentTime;
       wdt_reset();
     }
   }
 }
 
+void lowFire() {
+  lcd.clear();
+  lcd.setCursor(1, 0);
+  lcd.print("XAMILI ENAUSI");
+  relay(0, 0, 1, 1);
+  lcd.setCursor(0, 1);
+  lcd.print("KAYSAERIA ");
+  lcd.print(exhaustValue);  //ktc.readCelsius()
+  lcd.print(" C");
+}
+
+void warmingUp() {
+  time = 0;
+  pellet = false;
+  digitalWrite(motorPellet, HIGH);
+  digitalWrite(motorAir, LOW);
+  digitalWrite(beginResistor, HIGH);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("ZESTAMA ");
+  lcd.setCursor(0, 1);
+  lcd.print("KAYSAERIA ");
+  lcd.print(exhaustValue);  //ktc.readCelsius()
+  lcd.print(" C");
+  onOffTimer(6, 1, 2, 10);  //i = 1
+}
+
+void mainWorking() {
+  if (!autoManual()) {
+    if (sensors.getTempCByIndex(0) <= 51 && MAX == true) {
+      onOffTimer(6, 2, 3, 10);  //i = 2
+    } else if (sensors.getTempCByIndex(0) >= 45 && sensors.getTempCByIndex(0) < 51) {
+      onOffTimer(6, 3, 3, 10);  //i = 2
+      if (sensors.getTempCByIndex(0) < 45) {
+        MAX = true;
+      }
+    } else {
+      onOffTimer(6, 4, 2, 20); //i = 2
+      MAX = false;
+      if (sensors.getTempCByIndex(0) < 45) {
+        MAX = true;
+      }
+    }
+  } else if (autoManual()) {
+    relay(0, 1, 1, 0);
+  }
+}
+
 void preFlameOperation() {
+  pellet = true;
   unsigned long currentTime = millis();
   if (millis() - previousTime >= 1000) {
-    ignition = false;
     time++;
     if (time >= 14 && time <= 15) {
       relay(0, 0, 1, 1);
@@ -149,6 +198,12 @@ void preFlameOperation() {
   }
 }
 
+bool autoManual() {
+  if (analogRead(A3) >= 512) {
+    return true;
+  }
+  return false;
+}
 void errorOn() {
   lcd.clear();
   lcd.setCursor(4, 1);
@@ -211,7 +266,7 @@ void relay(bool air, bool resist, bool motorpellet, bool onofftimers) {
   digitalWrite(onOffTimmers, onofftimers);
 }
 
-void onOffTimer(int relayPin, int i, int long onTime, long offTime) {
+void onOffTimer(int relayPin, int i, long offTime, int long onTime) {
   unsigned long currentMillis = millis();
   onTime = onTime * 1000;
   offTime = offTime * 1000;
