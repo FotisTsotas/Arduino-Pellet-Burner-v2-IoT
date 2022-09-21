@@ -125,7 +125,7 @@ void lowFire() {
 void warmingUp() {
   time = 0;
   pellet = false;
-  digitalWrite(motorPellet, HIGH);
+  digitalWrite(onOffTimmers, HIGH);
   digitalWrite(motorAir, LOW);
   digitalWrite(beginResistor, HIGH);
   lcd.clear();
@@ -138,27 +138,75 @@ void warmingUp() {
   onOffTimer(6, 1, 2, 10);  //i = 1
 }
 
-void mainWorking() {
+void mainWorking() { // problem
   if (!autoManual()) {
-    if (sensors.getTempCByIndex(0) <= 51 && MAX == true) {
-      onOffTimer(6, 2, 3, 10);  //i = 2
-    } else if (sensors.getTempCByIndex(0) >= 45 && sensors.getTempCByIndex(0) < 51) {
-      onOffTimer(6, 3, 3, 10);  //i = 2
-      if (sensors.getTempCByIndex(0) < 45) {
+    digitalWrite(onOffTimmers, HIGH);
+    digitalWrite(motorAir, LOW);
+    digitalWrite(beginResistor, HIGH);
+    if (waterValue <= 51 && MAX == true) {
+      onOffTimer(6, 2, 10, 3);  //i = 2
+    } else if (waterValue >= 45 && waterValue < 51) {
+       onOffTimer(6, 3, 10, 3); //i = 3
+      if (waterValue < 45) {
         MAX = true;
       }
     } else {
-      onOffTimer(6, 4, 2, 20); //i = 2
+       onOffTimer(6, 4, 10, 3);  //i = 4
       MAX = false;
-      if (sensors.getTempCByIndex(0) < 45) {
+      if (waterValue < 45) {
         MAX = true;
       }
     }
   } else if (autoManual()) {
     relay(0, 1, 1, 0);
   }
+  showDataOnLcd();
+  wdt_reset();
 }
 
+void showDataOnLcd() {
+  unsigned long currentTime = millis();
+  firePerCent = fireValue / 1023;
+  firePerCent = 1 - firePerCent;
+  firePerCent = firePerCent * 100;
+  String operation;
+  if (!autoManual()) {
+    operation = "KANONIKH LEIT. A";
+  } else {
+    operation = "KANONIKH LEIT. M";
+  }
+  if (currentTime - previousMillis[6] >= 1000) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print(operation);
+    lcd.setCursor(0, 1);
+    lcd.print("FOTIA");
+    lcd.setCursor(6, 1);
+    lcd.print(firePerCent);
+    lcd.print("%");
+    previousMillis[6] = currentTime;  // i=6
+  }
+  if (currentTime - previousMillis[7] >= 2000) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print(operation);
+    lcd.setCursor(0, 1);
+    lcd.print("KAYSAERIA");
+    lcd.setCursor(11, 1);
+    lcd.print(exhaustValue);
+    previousMillis[7] = currentTime;  // i=7
+  }
+  if (currentTime - previousMillis[8] >= 3000) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print(operation);
+    lcd.setCursor(0, 1);
+    lcd.print("NERO");
+    lcd.setCursor(11, 1);
+    lcd.print(waterValue);
+    previousMillis[8] = currentTime;  // i=8
+  }
+}
 void preFlameOperation() {
   pellet = true;
   unsigned long currentTime = millis();
@@ -199,7 +247,7 @@ void preFlameOperation() {
 }
 
 bool autoManual() {
-  if (analogRead(A3) >= 512) {
+  if (digitalRead(1)) {
     return true;
   }
   return false;
@@ -241,7 +289,7 @@ void collectDataFromSensors() {
   unsigned long currentTime = millis();
   if (millis() - preTime >= 1000) {
     sensors.requestTemperatures();
-    waterValue = sensors.getTempCByIndex(0);
+    waterValue = analogRead(A3);    // sensors.getTempCByIndex(0);
     exhaustValue = analogRead(A1);  // tha mpei o  aisthtiras kausaeriwn
     fireValue = analogRead(flameSensor);
     volt = analogRead(voltageSensor);
@@ -279,6 +327,7 @@ void onOffTimer(int relayPin, int i, long offTime, int long onTime) {
     previousMillis[i] = currentMillis;
     digitalWrite(relayPin, state[i]);
   }
+  wdt_reset();
 }
 
 
