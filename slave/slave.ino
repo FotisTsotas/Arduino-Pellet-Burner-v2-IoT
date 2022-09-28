@@ -8,6 +8,9 @@
 #include <LiquidCrystal_I2C.h>
 #include <LiquidCrystal_SI2C.h>
 #define ONE_WIRE_BUS 5
+#define sel digitalRead(3) == 0
+#define up digitalRead(4) == 0
+#define down digitalRead(11) == 0
 const int flameSensor = A0;
 const int voltageSensor = A2;
 const int motorAir = 4;
@@ -21,7 +24,9 @@ int ktcCLK = 10;
 int volt = 0;
 int status = 0;
 int endTime = 2;
+int cleanTime = 2;
 int time = 0;
+int timeForClose = 0;
 float vOUT = 0.0;
 float vIN = 0.0;
 float R1 = 30000.0;
@@ -36,13 +41,15 @@ unsigned long pelletInDelayLastTime = 0;
 unsigned long pelletInDelay = 10000;
 unsigned long preTime = 0;
 bool state[10] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-auto timer = timer_create_default();
 bool open = false;
 bool manual = false;
 bool menu = false;
 bool error = false;
 bool pellet = false;
 bool MAX = true;
+bool menuOn = true;
+bool endOperation = false;
+bool cleaned = false;
 
 MAX6675 ktc(ktcCLK, ktcCS, ktcSO);
 LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
@@ -50,18 +57,20 @@ OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 
 void setup() {
-  relay(1, 1, 1, 1);
+  relay(0, 1, 1, 1);
   pinMode(motorAir, OUTPUT);
   pinMode(beginResistor, OUTPUT);
   pinMode(motorPellet, OUTPUT);
   pinMode(onOffTimmers, OUTPUT);
   pinMode(buzz, OUTPUT);
+  pinMode(up, INPUT);
+  pinMode(sel, INPUT);
+  pinMode(down, INPUT);
   lcd.begin(16, 2);
   sensors.begin();
   Wire.begin(8);
   Wire.onReceive(receiveEvent);
   Wire.onRequest(requestEvent);
-  Serial.begin(9600);
   wdt_enable(WDTO_2S);
   // while (EEPROM.read(0) == 0) {  //need reset button
   //   errorOn();
@@ -75,7 +84,6 @@ void loop() {
   } else {
     closed();
   }
-  // timer.tick();
 }
 
 void mainMode() {
@@ -89,7 +97,6 @@ void mainMode() {
 
 void started() {
   if ((fireValue >= 500) && exhaustValue <= 25) {  // ktc.readCelsius() <= 25
-
     preFlameOperation();
   } else {
     unsigned long currentTime = millis();
@@ -115,11 +122,11 @@ void lowFire() {
   lcd.clear();
   lcd.setCursor(1, 0);
   lcd.print("XAMILI ENAUSI");
-  relay(0, 0, 1, 1);
   lcd.setCursor(0, 1);
   lcd.print("KAYSAERIA ");
   lcd.print(exhaustValue);  //ktc.readCelsius()
   lcd.print(" C");
+  relay(0, 0, 1, 1);
 }
 
 void warmingUp() {
@@ -135,33 +142,95 @@ void warmingUp() {
   lcd.print("KAYSAERIA ");
   lcd.print(exhaustValue);  //ktc.readCelsius()
   lcd.print(" C");
-  onOffTimer(6, 1, 2, 10);  //i = 1
+  endOperation = true;
 }
 
-void mainWorking() { // problem
-  if (!autoManual()) {
+void warmingUpTimer() {
+  unsigned long currentMillis = millis();
+  int i = 1;
+  int onTime = 3000;
+  int offTime = 10000;
+  if ((state[i] == HIGH) && (currentMillis - previousMillis[i] >= onTime)) {
+    state[i] = LOW;
+    previousMillis[i] = currentMillis;
+    digitalWrite(motorPellet, HIGH);
+  } else if ((state[i] == LOW) && (currentMillis - previousMillis[i] >= offTime)) {
+    state[i] = HIGH;
+    previousMillis[i] = currentMillis;
+    digitalWrite(motorPellet, LOW);
+  }
+}
+
+void mainWorking() {
+  if (!manual) {
     digitalWrite(onOffTimmers, HIGH);
     digitalWrite(motorAir, LOW);
     digitalWrite(beginResistor, HIGH);
     if (waterValue <= 51 && MAX == true) {
-      onOffTimer(6, 2, 10, 3);  //i = 2
+      highTimer();
     } else if (waterValue >= 45 && waterValue < 51) {
-       onOffTimer(6, 3, 10, 3); //i = 3
+      midTimer();
       if (waterValue < 45) {
         MAX = true;
       }
     } else {
-       onOffTimer(6, 4, 10, 3);  //i = 4
+      lowTimer();
       MAX = false;
       if (waterValue < 45) {
         MAX = true;
       }
     }
-  } else if (autoManual()) {
+  } else if (manual) {
     relay(0, 1, 1, 0);
   }
+  endOperation = true;
   showDataOnLcd();
   wdt_reset();
+}
+
+
+void highTimer() {
+  unsigned long currentMillis = millis();
+  int i = 2;
+  int onTime = 3000;
+  int offTime = 10000;
+  if ((state[i] == HIGH) && (currentMillis - previousMillis[i] >= onTime)) {
+    state[i] = LOW;
+    previousMillis[i] = currentMillis;
+    digitalWrite(motorPellet, HIGH);
+  } else if ((state[i] == LOW) && (currentMillis - previousMillis[i] >= offTime)) {
+    state[i] = HIGH;
+    previousMillis[i] = currentMillis;
+    digitalWrite(motorPellet, LOW);
+  }
+}
+
+void midTimer() {
+  unsigned long currentMillis = millis();
+  int i = 3;
+  if ((state[i] == HIGH) && (currentMillis - previousMillis[i] >= 3000)) {
+    state[i] = LOW;
+    previousMillis[i] = currentMillis;
+    digitalWrite(motorPellet, HIGH);
+  } else if ((state[i] == LOW) && (currentMillis - previousMillis[i] >= 10000)) {
+    state[i] = HIGH;
+    previousMillis[i] = currentMillis;
+    digitalWrite(motorPellet, LOW);
+  }
+}
+
+void lowTimer() {
+  int i = 4;
+  unsigned long currentMillis = millis();
+  if ((state[i] == HIGH) && (currentMillis - previousMillis[i] >= 3000)) {
+    state[i] = LOW;
+    previousMillis[i] = currentMillis;
+    digitalWrite(motorPellet, HIGH);
+  } else if ((state[i] == LOW) && (currentMillis - previousMillis[i] >= 10000)) {
+    state[i] = HIGH;
+    previousMillis[i] = currentMillis;
+    digitalWrite(motorPellet, LOW);
+  }
 }
 
 void showDataOnLcd() {
@@ -170,7 +239,7 @@ void showDataOnLcd() {
   firePerCent = 1 - firePerCent;
   firePerCent = firePerCent * 100;
   String operation;
-  if (!autoManual()) {
+  if (!manual) {
     operation = "KANONIKH LEIT. A";
   } else {
     operation = "KANONIKH LEIT. M";
@@ -207,8 +276,10 @@ void showDataOnLcd() {
     previousMillis[8] = currentTime;  // i=8
   }
 }
+
 void preFlameOperation() {
   pellet = true;
+  endOperation = false;
   unsigned long currentTime = millis();
   if (millis() - previousTime >= 1000) {
     time++;
@@ -246,12 +317,14 @@ void preFlameOperation() {
   }
 }
 
-bool autoManual() {
-  if (digitalRead(1)) {
-    return true;
+void autoManual() {
+  if (digitalRead(12)) {
+    manual = true;
+  } else {
+    manual = false;
   }
-  return false;
 }
+
 void errorOn() {
   lcd.clear();
   lcd.setCursor(4, 1);
@@ -279,7 +352,58 @@ void pelletIn() {
   pellet = true;
   EEPROM.write(0, 1);
 }
+
 void closed() {
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousMillis[9] >= 1000) {
+    if (endOperation) {
+      if (!cleaned) {
+        clean();
+        cleaned = true;
+      } else {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("KLEISTO");
+        lcd.setCursor(0, 1);
+        lcd.print(exhaustValue);
+        relay(1, 1, 1, 1);
+      }
+    } else {
+      if (timeForClose < 5) {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("KLEISIMO");
+        lcd.setCursor(9, 0);
+        lcd.print(timeForClose);
+        lcd.setCursor(0, 1);
+        lcd.print(exhaustValue);
+        relay(0, 1, 1, 1);
+      } else {
+        endOperation = true;
+        cleaned = true;
+      }
+      timeForClose++;
+    }
+    wdt_reset();
+    previousMillis[9] = currentMillis;
+  }
+}
+
+void clean() {
+  while (cleanTime >= 0) {
+    relay(0, 1, 1, 1);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("KATHARISMOS");
+    lcd.setCursor(0, 1);
+    lcd.print(cleanTime);
+    lcd.print(" sec");
+    cleanTime--;
+    EEPROM.write(0, 0);
+    delay(1000);
+    wdt_reset();
+  }
+  EEPROM.write(0, 1);
 }
 
 void menuMode() {
@@ -300,9 +424,8 @@ void collectDataFromSensors() {
     } else {
       open = false;
     }
-    Serial.println(fireValue);
-    Serial.println(exhaustValue);
     preTime = currentTime;
+    autoManual();
     wdt_reset();
   }
 }
@@ -313,23 +436,6 @@ void relay(bool air, bool resist, bool motorpellet, bool onofftimers) {
   digitalWrite(motorPellet, motorpellet);
   digitalWrite(onOffTimmers, onofftimers);
 }
-
-void onOffTimer(int relayPin, int i, long offTime, int long onTime) {
-  unsigned long currentMillis = millis();
-  onTime = onTime * 1000;
-  offTime = offTime * 1000;
-  if ((state[i] == HIGH) && (currentMillis - previousMillis[i] >= onTime)) {
-    state[i] = LOW;
-    previousMillis[i] = currentMillis;
-    digitalWrite(relayPin, state[i]);
-  } else if ((state[i] == LOW) && (currentMillis - previousMillis[i] >= offTime)) {
-    state[i] = HIGH;
-    previousMillis[i] = currentMillis;
-    digitalWrite(relayPin, state[i]);
-  }
-  wdt_reset();
-}
-
 
 void receiveEvent(int howMany) {
   // while (0 < Wire.available()) {
