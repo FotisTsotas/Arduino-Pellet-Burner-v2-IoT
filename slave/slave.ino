@@ -28,8 +28,8 @@ int cleanTime = 2;
 int time = 0;
 int timeForClose = 0;
 int count = 0;
-int standBy[3] = { 0, 0, 0 };
-int throwing[3] = { 0, 0, 0 };
+int standBy[4] = { 0, 0, 0, 0 };
+int throwing[4] = { 0, 0, 0, 0 };
 int initialPellet = 0;
 float vOUT = 0.0;
 float vIN = 0.0;
@@ -39,7 +39,7 @@ float fireValue = 0;
 float exhaustValue = 0;
 float waterValue = 0;
 float firePerCent;
-unsigned long previousMillis[13] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};  //number of onOfftimers
+unsigned long previousMillis[13] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };  //number of onOfftimers
 unsigned long previousTime = 0;
 unsigned long pelletInDelayLastTime = 0;
 unsigned long pelletInDelay = 10000;
@@ -103,7 +103,11 @@ void loop() {
 void menu(bool state) {
   unsigned long currentTime = millis();
   if (currentTime - previousMillis[10] >= 1000 && sel) {
-    if (count > 1) { menuOn = state; }
+    if (count > 1) {
+      manual = true;
+      menuOn = state;
+      delay(100);
+    }
     lcd.clear();
     lcd.setCursor(1, 0);
     lcd.print(count);
@@ -124,7 +128,7 @@ void mainMode() {
 
 
 void started() {
-  if ((fireValue >= 500) && exhaustValue <= 25) {  // ktc.readCelsius() <= 25
+  if (fireValue >= 500 && exhaustValue <= 25) {  // ktc.readCelsius() <= 25
     preFlameOperation();
   } else {
     unsigned long currentTime = millis();
@@ -163,6 +167,7 @@ void warmingUp() {
   digitalWrite(onOffTimmers, HIGH);
   digitalWrite(motorAir, LOW);
   digitalWrite(beginResistor, HIGH);
+  warmingUpTimer();
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("ZESTAMA ");
@@ -176,16 +181,16 @@ void warmingUp() {
 void warmingUpTimer() {
   unsigned long currentMillis = millis();
   int i = 1;
-  int onTime = 3000;
-  int offTime = 10000;
-  if ((state[i] == HIGH) && (currentMillis - previousMillis[i] >= onTime)) {
+  int onTime = throwing[3] * 1000;
+  int offTime = standBy[3] * 1000;
+  if ((state[i] == HIGH) && (currentMillis - previousMillis[i] >= offTime)) {
     state[i] = LOW;
-    previousMillis[i] = currentMillis;
-    digitalWrite(motorPellet, HIGH);
-  } else if ((state[i] == LOW) && (currentMillis - previousMillis[i] >= offTime)) {
-    state[i] = HIGH;
-    previousMillis[i] = currentMillis;
     digitalWrite(motorPellet, LOW);
+    previousMillis[i] = currentMillis;
+  } else if ((state[i] == LOW) && (currentMillis - previousMillis[i] >= onTime)) {
+    state[i] = HIGH;
+    digitalWrite(motorPellet, HIGH);
+    previousMillis[i] = currentMillis;
   }
 }
 
@@ -216,8 +221,8 @@ void mainWorking() {
 void highTimer() {
   unsigned long currentMillis = millis();
   int i = 2;
-  int onTime = 3000;
-  int offTime = 10000;
+  int onTime = throwing[0] * 1000;
+  int offTime = standBy[0] * 1000;
   if ((state[i] == HIGH) && (currentMillis - previousMillis[i] >= onTime)) {
     state[i] = LOW;
     previousMillis[i] = currentMillis;
@@ -232,11 +237,13 @@ void highTimer() {
 void midTimer() {
   unsigned long currentMillis = millis();
   int i = 3;
-  if ((state[i] == HIGH) && (currentMillis - previousMillis[i] >= 3000)) {
+  int onTime = throwing[1] * 1000;
+  int offTime = standBy[1] * 1000;
+  if ((state[i] == HIGH) && (currentMillis - previousMillis[i] >= onTime)) {
     state[i] = LOW;
     previousMillis[i] = currentMillis;
     digitalWrite(motorPellet, HIGH);
-  } else if ((state[i] == LOW) && (currentMillis - previousMillis[i] >= 10000)) {
+  } else if ((state[i] == LOW) && (currentMillis - previousMillis[i] >= offTime)) {
     state[i] = HIGH;
     previousMillis[i] = currentMillis;
     digitalWrite(motorPellet, LOW);
@@ -245,12 +252,14 @@ void midTimer() {
 
 void lowTimer() {
   int i = 4;
+  int onTime = throwing[2] * 1000;
+  int offTime = standBy[2] * 1000;
   unsigned long currentMillis = millis();
-  if ((state[i] == HIGH) && (currentMillis - previousMillis[i] >= 3000)) {
+  if ((state[i] == HIGH) && (currentMillis - previousMillis[i] >= onTime)) {
     state[i] = LOW;
     previousMillis[i] = currentMillis;
     digitalWrite(motorPellet, HIGH);
-  } else if ((state[i] == LOW) && (currentMillis - previousMillis[i] >= 10000)) {
+  } else if ((state[i] == LOW) && (currentMillis - previousMillis[i] >= offTime)) {
     state[i] = HIGH;
     previousMillis[i] = currentMillis;
     digitalWrite(motorPellet, LOW);
@@ -433,7 +442,7 @@ void clean() {
 
 void menuMode() {
   unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis[12] >= 1000) {
+  if (currentMillis - previousMillis[12] >= 500) {
     updown();
     levelMenu();
     previousMillis[12] = currentMillis;
@@ -442,23 +451,31 @@ void menuMode() {
 }
 
 void selected(int level, int number) {
-  if (sel) {
-    if (clicks == 0) {
-      clicks = 1;
-      count = 0;
-    } else if (clicks == 1) {
-      if (level == 3) {
-        levelTwo = 100;
-        levelThree = number;
-      } else if (level == 2) {
-        levelThree = 100;
-        levelTwo = number;
-        lcd.clear();
-      }
-      count = 0;
-      clicks = 0;
-      delay(500);
+  while (sel) {
+    clicks++;
+    lcd.clear();
+    lcd.print(clicks);
+    delay(450);
+  }
+  if (clicks >= 1 && clicks < 3) {
+    if (level == 3) {
+      levelTwo = 100;
+      levelThree = number;
+    } else if (level == 2) {
+      lcd.clear();
+      levelThree = 100;
+      levelTwo = number;
     }
+    count = 0;
+    clicks = 0;
+  } else if (clicks >= 3) {
+    levelTwo = 100;
+    menuOn = false;
+    count = 0;
+    manual = false;
+    clicks = 0;
+  } else {
+    return;
   }
 }
 
@@ -475,71 +492,91 @@ void setUpTimesForTimers() {
   standBy[0] = EEPROM.read(1);
   standBy[1] = EEPROM.read(3);
   standBy[2] = EEPROM.read(5);
+  standBy[3] = EEPROM.read(8);
   throwing[0] = EEPROM.read(2);
   throwing[1] = EEPROM.read(4);
   throwing[2] = EEPROM.read(6);
+  throwing[3] = EEPROM.read(9);
+  initialPellet = EEPROM.read(7);
 }
 
 void levelMenu() {
-unsigned long currentMillis = millis();
+  unsigned long currentMillis = millis();
   if (currentMillis - previousMillis[13] >= 300) {
-  switch (levelTwo) {
-    case 0:
-      menuLcd("XRON.AN.1", "XRON.RIP.1", 0);
-      selected(3, 0);
-      break;
-    case 1:
-      menuLcd("XRON.AN.1", "XRON.RIP.1", 1);
-      selected(3, 1);
-      break;
-    case 2:
-      menuLcd("XRON.AN.2", "XRON.RIP.2", 0);
-      selected(3, 2);
-      break;
-    case 3:
-      menuLcd("XRON.AN.2", "XRON.RIP.2", 1);
-      selected(3, 3);
-      break;
-    case 4:
-      menuLcd("XRON.AN.3", "XRON.RIP.3", 0);
-      selected(3, 4);
-      break;
-    case 5:
-      menuLcd("XRON.AN.3", "XRON.RIP.3", 1);
-      selected(3, 5);
-      break;
-    case 6:
-      menuLcd("XRON.A.PEL", " ", 0);
-      selected(3, 6);
-      break;
-    case 7:
-      levelTwo = 0;
-      break;
-  }
+    switch (levelTwo) {
+      case 0:
+        menuLcd("XRON.AN.H", "XRON.RIP.H", 0);
+        selected(3, 0);
+        break;
+      case 1:
+        menuLcd("XRON.AN.H", "XRON.RIP.H", 1);
+        selected(3, 1);
+        break;
+      case 2:
+        menuLcd("XRON.AN.M", "XRON.RIP.M", 0);
+        selected(3, 2);
+        break;
+      case 3:
+        menuLcd("XRON.AN.M", "XRON.RIP.M", 1);
+        selected(3, 3);
+        break;
+      case 4:
+        menuLcd("XRON.AN.L", "XRON.RIP.L", 0);
+        selected(3, 4);
+        break;
+      case 5:
+        menuLcd("XRON.AN.L", "XRON.RIP.L", 1);
+        selected(3, 5);
+        break;
+      case 6:
+        menuLcd("XRON.A.PEL", "XRON.AN.ZES", 0);
+        selected(3, 6);
+        break;
+      case 7:
+        menuLcd("XRON.A.PEL", "XRON.AN.ZES", 1);
+        selected(3, 7);
+        break;
+      case 8:
+        menuLcd("XRON.PEL.ZES", " ", 0);
+        selected(3, 8);
+        break;
+      case 9:
+        levelTwo = 0;
+        break;
+    }
 
-  switch (levelThree) {
-    case 0:
-      setTimerStandBy(0, 0, 1);
-      break;
-    case 1:
-      setTimerThrowing(0, 1, 2);
-      break;
-    case 2:
-      setTimerStandBy(1, 2, 3);
-      break;
-    case 3:
-      setTimerThrowing(1, 3, 4);
-      break;
-    case 4:
-      setTimerStandBy(2, 4, 5);
-      break;
-    case 5:
-      setTimerThrowing(2, 5, 6);
-      break;
-    case 6:
-      setInitialTime();
-      break;
-  }
+    switch (levelThree) {
+      case 0:
+        setTimerStandBy(0, 0, 1);
+        break;
+      case 1:
+        setTimerThrowing(0, 1, 2);
+        break;
+      case 2:
+        setTimerStandBy(1, 2, 3);
+        break;
+      case 3:
+        setTimerThrowing(1, 3, 4);
+        break;
+      case 4:
+        setTimerStandBy(2, 4, 5);
+        break;
+      case 5:
+        setTimerThrowing(2, 5, 6);
+        break;
+      case 6:
+        setInitialTime();
+        break;
+      case 7:
+        setTimerStandBy(3, 7, 8);
+        break;
+      case 8:
+        setTimerThrowing(3, 8, 9);
+        break;
+      case 9:
+        menuOn = false;
+        break;
+    }
     previousMillis[13] = currentMillis;
   }
 }
@@ -599,6 +636,9 @@ void setInitialTime() {
 void updown() {
   if (up) {
     lcd.clear();
+    if (levelTwo == 0) {
+      levelTwo = 8;
+    }
     levelTwo--;
   }
   if (down) {
