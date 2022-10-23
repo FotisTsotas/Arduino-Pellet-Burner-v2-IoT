@@ -8,12 +8,12 @@
 #include <LiquidCrystal_I2C.h>
 #include <LiquidCrystal_SI2C.h>
 #define ONE_WIRE_BUS 5
-#define sel digitalRead(3) == 0
-#define up digitalRead(4) == 0
-#define down digitalRead(11) == 0
+#define sel digitalRead(3) == 1
+#define up digitalRead(11) == 1
+#define down digitalRead(4) == 1
 const int flameSensor = A0;
 const int voltageSensor = A2;
-const int motorAir = 4;
+const int motorAir = 10;
 const int beginResistor = 2;
 const int motorPellet = 6;
 const int onOffTimmers = 7;
@@ -27,6 +27,10 @@ int endTime = 2;
 int cleanTime = 2;
 int time = 0;
 int timeForClose = 0;
+int count = 0;
+int standBy[3] = { 0, 0, 0 };
+int throwing[3] = { 0, 0, 0 };
+int initialPellet = 0;
 float vOUT = 0.0;
 float vIN = 0.0;
 float R1 = 30000.0;
@@ -35,7 +39,7 @@ float fireValue = 0;
 float exhaustValue = 0;
 float waterValue = 0;
 float firePerCent;
-unsigned long previousMillis[10] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };  //number of onOfftimers
+unsigned long previousMillis[13] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};  //number of onOfftimers
 unsigned long previousTime = 0;
 unsigned long pelletInDelayLastTime = 0;
 unsigned long pelletInDelay = 10000;
@@ -43,13 +47,17 @@ unsigned long preTime = 0;
 bool state[10] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 bool open = false;
 bool manual = false;
-bool menu = false;
 bool error = false;
 bool pellet = false;
 bool MAX = true;
-bool menuOn = true;
+bool menuOn = false;
 bool endOperation = false;
 bool cleaned = false;
+char levelTwo = 0;
+char levelThree = 200;
+unsigned long timePress = 0;
+unsigned long timePressLimit = 0;
+int clicks = 0;
 
 MAX6675 ktc(ktcCLK, ktcCS, ktcSO);
 LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
@@ -72,18 +80,38 @@ void setup() {
   Wire.onReceive(receiveEvent);
   Wire.onRequest(requestEvent);
   wdt_enable(WDTO_2S);
+  setUpTimesForTimers();
   // while (EEPROM.read(0) == 0) {  //need reset button
   //   errorOn();
   // }
 }
 
 void loop() {
-  collectDataFromSensors();
-  if (open) {
-    mainMode();
+  if (menuOn) {
+    menuMode();
   } else {
-    closed();
+    menu(true);
+    collectDataFromSensors();
+    if (open) {
+      mainMode();
+    } else {
+      closed();
+    }
   }
+}
+
+void menu(bool state) {
+  unsigned long currentTime = millis();
+  if (currentTime - previousMillis[10] >= 1000 && sel) {
+    if (count > 1) { menuOn = state; }
+    lcd.clear();
+    lcd.setCursor(1, 0);
+    lcd.print(count);
+    count++;
+    if (menuOn == state) { count = 0; }
+    previousMillis[10] = currentTime;  // i=10
+  }
+  wdt_reset();
 }
 
 void mainMode() {
@@ -170,15 +198,11 @@ void mainWorking() {
       highTimer();
     } else if (waterValue >= 45 && waterValue < 51) {
       midTimer();
-      if (waterValue < 45) {
-        MAX = true;
-      }
+      if (waterValue < 45) { MAX = true; }
     } else {
       lowTimer();
       MAX = false;
-      if (waterValue < 45) {
-        MAX = true;
-      }
+      if (waterValue < 45) { MAX = true; }
     }
   } else if (manual) {
     relay(0, 1, 1, 0);
@@ -244,6 +268,7 @@ void showDataOnLcd() {
   } else {
     operation = "KANONIKH LEIT. M";
   }
+
   if (currentTime - previousMillis[6] >= 1000) {
     lcd.clear();
     lcd.setCursor(0, 0);
@@ -407,6 +432,179 @@ void clean() {
 }
 
 void menuMode() {
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousMillis[12] >= 1000) {
+    updown();
+    levelMenu();
+    previousMillis[12] = currentMillis;
+  }
+  wdt_reset();
+}
+
+void selected(int level, int number) {
+  if (sel) {
+    if (clicks == 0) {
+      clicks = 1;
+      count = 0;
+    } else if (clicks == 1) {
+      if (level == 3) {
+        levelTwo = 100;
+        levelThree = number;
+      } else if (level == 2) {
+        levelThree = 100;
+        levelTwo = number;
+        lcd.clear();
+      }
+      count = 0;
+      clicks = 0;
+      delay(500);
+    }
+  }
+}
+
+void menuLcd(const String& first, const String& second, int arrow) {
+  lcd.setCursor(0, 0);
+  lcd.print(first);
+  lcd.setCursor(13, arrow);
+  lcd.print("<-");
+  lcd.setCursor(0, 1);
+  lcd.print(second);
+}
+
+void setUpTimesForTimers() {
+  standBy[0] = EEPROM.read(1);
+  standBy[1] = EEPROM.read(3);
+  standBy[2] = EEPROM.read(5);
+  throwing[0] = EEPROM.read(2);
+  throwing[1] = EEPROM.read(4);
+  throwing[2] = EEPROM.read(6);
+}
+
+void levelMenu() {
+unsigned long currentMillis = millis();
+  if (currentMillis - previousMillis[13] >= 300) {
+  switch (levelTwo) {
+    case 0:
+      menuLcd("XRON.AN.1", "XRON.RIP.1", 0);
+      selected(3, 0);
+      break;
+    case 1:
+      menuLcd("XRON.AN.1", "XRON.RIP.1", 1);
+      selected(3, 1);
+      break;
+    case 2:
+      menuLcd("XRON.AN.2", "XRON.RIP.2", 0);
+      selected(3, 2);
+      break;
+    case 3:
+      menuLcd("XRON.AN.2", "XRON.RIP.2", 1);
+      selected(3, 3);
+      break;
+    case 4:
+      menuLcd("XRON.AN.3", "XRON.RIP.3", 0);
+      selected(3, 4);
+      break;
+    case 5:
+      menuLcd("XRON.AN.3", "XRON.RIP.3", 1);
+      selected(3, 5);
+      break;
+    case 6:
+      menuLcd("XRON.A.PEL", " ", 0);
+      selected(3, 6);
+      break;
+    case 7:
+      levelTwo = 0;
+      break;
+  }
+
+  switch (levelThree) {
+    case 0:
+      setTimerStandBy(0, 0, 1);
+      break;
+    case 1:
+      setTimerThrowing(0, 1, 2);
+      break;
+    case 2:
+      setTimerStandBy(1, 2, 3);
+      break;
+    case 3:
+      setTimerThrowing(1, 3, 4);
+      break;
+    case 4:
+      setTimerStandBy(2, 4, 5);
+      break;
+    case 5:
+      setTimerThrowing(2, 5, 6);
+      break;
+    case 6:
+      setInitialTime();
+      break;
+  }
+    previousMillis[13] = currentMillis;
+  }
+}
+
+void setTimerStandBy(int timer, int back, int address) {
+  lcd.clear();
+  lcd.print("XRONOS ANAM = ");
+  lcd.setCursor(12, 0);
+  lcd.print(timer + 1);
+  lcd.setCursor(0, 1);
+  lcd.print(standBy[timer]);
+  if (up) {
+    standBy[timer]++;
+    standBy[timer] = constrain(standBy[timer], 0, 25);
+  } else if (down) {
+    standBy[timer]--;
+    standBy[timer] = constrain(standBy[timer], 0, 25);
+  }
+  EEPROM.write(address, standBy[timer]);
+  selected(2, back);
+}
+
+void setTimerThrowing(int timer, int back, int address) {
+  lcd.clear();
+  lcd.print("XRONOS RISP = ");
+  lcd.setCursor(12, 0);
+  lcd.print(timer + 1);
+  lcd.setCursor(0, 1);
+  lcd.print(throwing[timer]);
+  if (up) {
+    throwing[timer]++;
+    throwing[timer] = constrain(throwing[timer], 0, 25);
+  } else if (down) {
+    throwing[timer]--;
+    throwing[timer] = constrain(throwing[timer], 0, 25);
+  }
+  EEPROM.write(address, throwing[timer]);
+  selected(2, back);
+}
+
+void setInitialTime() {
+  lcd.clear();
+  lcd.print("ARXIKO PELLET = ");
+  lcd.setCursor(0, 1);
+  lcd.print(initialPellet);
+  if (up) {
+    initialPellet++;
+    initialPellet = constrain(initialPellet, 0, 25);
+  } else if (down) {
+    initialPellet--;
+    initialPellet = constrain(initialPellet, 0, 25);
+  }
+  EEPROM.write(7, initialPellet);
+  selected(2, 6);
+}
+
+void updown() {
+  if (up) {
+    lcd.clear();
+    levelTwo--;
+  }
+  if (down) {
+    lcd.clear();
+    levelTwo++;
+  }
 }
 
 void collectDataFromSensors() {
