@@ -12,12 +12,12 @@
 #define up digitalRead(11) == 1
 #define down digitalRead(4) == 1
 const int flameSensor = A0;
-const int voltageSensor = A2;
-const int motorAir = 10;
 const int beginResistor = 2;
-const int motorPellet = 6;
+const int motorAir = 1;
 const int onOffTimmers = 7;
-const int buzz = 13;
+const int motorPellet = 12;  //allagi se 6
+const int voltageSensor = A2;
+const int buzz = 8;
 int ktcSO = 8;
 int ktcCS = 9;
 int ktcCLK = 10;
@@ -53,7 +53,7 @@ bool MAX = true;
 bool menuOn = false;
 bool endOperation = false;
 bool cleaned = false;
-char levelTwo = 0;
+char levelTwo = 1;
 char levelThree = 200;
 unsigned long timePress = 0;
 unsigned long timePressLimit = 0;
@@ -80,10 +80,11 @@ void setup() {
   Wire.onReceive(receiveEvent);
   Wire.onRequest(requestEvent);
   wdt_enable(WDTO_2S);
+  // resetEppromReads();
   setUpTimesForTimers();
-  // while (EEPROM.read(0) == 0) {  //need reset button
-  //   errorOn();
-  // }
+  while (!EEPROM.read(0)) {  //need reset button
+    errorOn();
+  }
 }
 
 void loop() {
@@ -113,16 +114,27 @@ void menu(bool state) {
     lcd.print(count);
     count++;
     if (menuOn == state) { count = 0; }
-    previousMillis[10] = currentTime;  // i=10
+    previousMillis[10] = currentTime;
   }
   wdt_reset();
 }
 
 void mainMode() {
-  if (!pellet && (exhaustValue < 35 || fireValue > 900)) {  // ktc.readCelsius() <= 25
-    pelletIn();
+  if (!EEPROM.read(15)) {
+    if (sel) {
+      EEPROM.write(15, 1);
+    }
+    menu(true);
+    showDataOnLcd(true);
+    collectDataFromSensors();
+    relay(0, 0, 1, 0);
+    wdt_reset();
   } else {
-    started();
+    if (!pellet && (exhaustValue < 35 || fireValue > 900)) {
+      pelletIn();
+    } else {
+      started();
+    }
   }
 }
 
@@ -132,7 +144,7 @@ void started() {
     preFlameOperation();
   } else {
     unsigned long currentTime = millis();
-    if (millis() - previousMillis[5] >= 1000) {  //i = 5
+    if (millis() - previousMillis[5] >= 1000) {
       time++;
       while (fireValue > 900) {
         errorOn();
@@ -158,6 +170,7 @@ void lowFire() {
   lcd.print("KAYSAERIA ");
   lcd.print(exhaustValue);  //ktc.readCelsius()
   lcd.print(" C");
+  pellet = false;
   relay(0, 0, 1, 1);
 }
 
@@ -213,7 +226,7 @@ void mainWorking() {
     relay(0, 1, 1, 0);
   }
   endOperation = true;
-  showDataOnLcd();
+  showDataOnLcd(false);
   wdt_reset();
 }
 
@@ -266,16 +279,24 @@ void lowTimer() {
   }
 }
 
-void showDataOnLcd() {
+void showDataOnLcd(bool open) {
   unsigned long currentTime = millis();
   firePerCent = fireValue / 1023;
   firePerCent = 1 - firePerCent;
   firePerCent = firePerCent * 100;
   String operation;
-  if (!manual) {
-    operation = "KANONIKH LEIT. A";
+  if (open) {
+    operation = "RELAY ANOIXTA !!!";
   } else {
-    operation = "KANONIKH LEIT. M";
+    if (!manual) {
+      if (exhaustValue > 300) {
+        operation = "KA.LEIT. HIGH TEMP A";
+      } else {
+        operation = "KANONIKH LEIT.A";
+      }
+    } else {
+      operation = "KANONIKH LEIT. M";
+    }
   }
 
   if (currentTime - previousMillis[6] >= 1000) {
@@ -305,13 +326,13 @@ void showDataOnLcd() {
     lcd.print(operation);
     lcd.setCursor(0, 1);
     lcd.print("NERO");
-    lcd.setCursor(11, 1);
+    lcd.setCursor(6, 1);
     lcd.print(waterValue);
     previousMillis[8] = currentTime;  // i=8
   }
 }
 
-void preFlameOperation() {
+void preFlameOperation() {  //allagi xxronius
   pellet = true;
   endOperation = false;
   unsigned long currentTime = millis();
@@ -352,7 +373,7 @@ void preFlameOperation() {
 }
 
 void autoManual() {
-  if (digitalRead(12)) {
+  if (digitalRead(13)) {
     manual = true;
   } else {
     manual = false;
@@ -367,6 +388,9 @@ void errorOn() {
   delay(500);
   digitalWrite(buzz, LOW);
   delay(500);
+  if (sel) {
+    EEPROM.write(0, 1);
+  }
 }
 
 void pelletIn() {
@@ -442,7 +466,7 @@ void clean() {
 
 void menuMode() {
   unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis[12] >= 500) {
+  if (currentMillis - previousMillis[12] >= 200) {
     updown();
     levelMenu();
     previousMillis[12] = currentMillis;
@@ -462,7 +486,6 @@ void selected(int level, int number) {
       levelTwo = 100;
       levelThree = number;
     } else if (level == 2) {
-      lcd.clear();
       levelThree = 100;
       levelTwo = number;
     }
@@ -474,6 +497,7 @@ void selected(int level, int number) {
     count = 0;
     manual = false;
     clicks = 0;
+    while (1) {}
   } else {
     return;
   }
@@ -487,6 +511,19 @@ void menuLcd(const String& first, const String& second, int arrow) {
   lcd.setCursor(0, 1);
   lcd.print(second);
 }
+
+void resetEppromReads() {
+  EEPROM.write(1, 12);
+  EEPROM.write(2, 3);
+  EEPROM.write(3, 15);
+  EEPROM.write(4, 3);
+  EEPROM.write(5, 15);
+  EEPROM.write(6, 2);
+  EEPROM.write(7, 2);  //pellet Init
+  EEPROM.write(8, 20);
+  EEPROM.write(9, 3);
+}
+
 
 void setUpTimesForTimers() {
   standBy[0] = EEPROM.read(1);
@@ -502,46 +539,53 @@ void setUpTimesForTimers() {
 
 void levelMenu() {
   unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis[13] >= 300) {
+  if (currentMillis - previousMillis[13] >= 100) {
     switch (levelTwo) {
       case 0:
-        menuLcd("XRON.AN.H", "XRON.RIP.H", 0);
-        selected(3, 0);
+        levelTwo = 10;
         break;
       case 1:
-        menuLcd("XRON.AN.H", "XRON.RIP.H", 1);
+        menuLcd("XRON.AN.H", "XRON.RIP.H", 0);
         selected(3, 1);
         break;
       case 2:
-        menuLcd("XRON.AN.M", "XRON.RIP.M", 0);
+        menuLcd("XRON.AN.H", "XRON.RIP.H", 1);
         selected(3, 2);
         break;
       case 3:
-        menuLcd("XRON.AN.M", "XRON.RIP.M", 1);
+        menuLcd("XRON.AN.M", "XRON.RIP.M", 0);
         selected(3, 3);
         break;
       case 4:
-        menuLcd("XRON.AN.L", "XRON.RIP.L", 0);
+        menuLcd("XRON.AN.M", "XRON.RIP.M", 1);
         selected(3, 4);
         break;
       case 5:
-        menuLcd("XRON.AN.L", "XRON.RIP.L", 1);
+        menuLcd("XRON.AN.L", "XRON.RIP.L", 0);
         selected(3, 5);
         break;
       case 6:
-        menuLcd("XRON.A.PEL", "XRON.AN.ZES", 0);
+        menuLcd("XRON.AN.L", "XRON.RIP.L", 1);
         selected(3, 6);
         break;
       case 7:
-        menuLcd("XRON.A.PEL", "XRON.AN.ZES", 1);
+        menuLcd("XRON.A.PEL", "XRON.AN.ZES", 0);
         selected(3, 7);
         break;
       case 8:
-        menuLcd("XRON.PEL.ZES", " ", 0);
+        menuLcd("XRON.A.PEL", "XRON.AN.ZES", 1);
         selected(3, 8);
         break;
       case 9:
-        levelTwo = 0;
+        menuLcd("XRON.PEL.ZES", "OPEN 3 RELAYS", 0);
+        selected(3, 9);
+        break;
+      case 10:
+        menuLcd("XRON.PEL.ZES", "OPEN 3 RELAYS", 1);
+        selected(3, 9);
+        break;
+      case 11:
+        levelTwo = 1;
         break;
     }
 
@@ -574,11 +618,27 @@ void levelMenu() {
         setTimerThrowing(3, 8, 9);
         break;
       case 9:
-        menuOn = false;
+        setOpenAllRelays();
+        break;
+      case 10:
         break;
     }
     previousMillis[13] = currentMillis;
   }
+}
+
+void setOpenAllRelays() {
+  if (up) {
+    lcd.clear();
+    lcd.print("OPEN");
+    EEPROM.write(15, 0);
+  }
+  if (down) {
+    lcd.clear();
+    lcd.print("CLOSE");
+    EEPROM.write(15, 1);
+  }
+  selected(2, 9);
 }
 
 void setTimerStandBy(int timer, int back, int address) {
@@ -636,9 +696,6 @@ void setInitialTime() {
 void updown() {
   if (up) {
     lcd.clear();
-    if (levelTwo == 0) {
-      levelTwo = 8;
-    }
     levelTwo--;
   }
   if (down) {
