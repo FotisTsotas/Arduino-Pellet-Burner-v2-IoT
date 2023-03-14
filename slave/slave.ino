@@ -1,3 +1,20 @@
+// AISTHITIRAS FWTIAS => A0
+//MANUAL/AUTO => A1
+// INSIDE ON/OFF => A2
+// LCD 1 => A4
+// LCD 2 => A5
+// MOTER AERA => 1
+//ANTISTASI FOTIAS => 2
+// SEL => 3
+// DOWN => 4
+// WATER => 5
+// KOXLIAS => 6
+// MOTER TIMER => 7
+// KTCSO => 8
+// KTCCS => 9
+// KTCCLK => 10
+// UP => 11
+// BUZZ ERROR => 12
 #include <Wire.h>
 #include <avr/wdt.h>
 #include <arduino-timer.h>
@@ -7,6 +24,9 @@
 #include <LCD.h>
 #include <LiquidCrystal_I2C.h>
 #include <LiquidCrystal_SI2C.h>
+#include "MainOperation.h"
+#include "Usual.h"
+
 #define ONE_WIRE_BUS 5
 #define sel digitalRead(3) == 1
 #define up digitalRead(11) == 1
@@ -63,9 +83,10 @@ MAX6675 ktc(ktcCLK, ktcCS, ktcSO);
 LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
+MainOperation mainOperation;
+Usual usual;
 
 void setup() {
-  relay(0, 1, 1, 1);
   pinMode(motorAir, OUTPUT);
   pinMode(beginResistor, OUTPUT);
   pinMode(motorPellet, OUTPUT);
@@ -74,16 +95,23 @@ void setup() {
   pinMode(up, INPUT);
   pinMode(sel, INPUT);
   pinMode(down, INPUT);
+  relay(0, 1, 1, 1);
+  usual.motorAir = motorAir;
+  usual.beginResistor = beginResistor;
+  usual.motorPellet = motorPellet;
+  usual.onOffTimmers = onOffTimmers;
+  mainOperation.buzz = buzz;
+
   lcd.begin(16, 2);
   sensors.begin();
   Wire.begin(8);
   Wire.onReceive(receiveEvent);
   Wire.onRequest(requestEvent);
   wdt_enable(WDTO_2S);
-  // resetEppromReads();
+  Usual::resetEppromReads();
   setUpTimesForTimers();
   while (!EEPROM.read(0)) {  //need reset button
-    errorOn();
+    Usual::errorOn(sel, buzz);
   }
 }
 
@@ -120,7 +148,7 @@ void menu(bool state) {
 }
 
 void mainMode() {
-  if (!EEPROM.read(15)) {
+  if (!EEPROM.read(15)) {  //All relays are open
     if (sel) {
       EEPROM.write(15, 1);
     }
@@ -141,17 +169,23 @@ void mainMode() {
 
 void started() {
   if (fireValue >= 500 && exhaustValue <= 25) {  // ktc.readCelsius() <= 25
-    preFlameOperation();
+
+    mainOperation.pellet = pellet;
+    mainOperation.preFlameOperation(fireValue, sel);
+    pellet = mainOperation.pellet;
+
   } else {
+
     unsigned long currentTime = millis();
     if (millis() - previousMillis[5] >= 1000) {
       time++;
       while (fireValue > 900) {
-        errorOn();
+        Usual::errorOn(sel, buzz);
+        wdt_reset();
       }
       if (exhaustValue >= 0 && exhaustValue <= 30) {  //ktc.readCelsius() >= 0 && ktc.readCelsius() <= 30
-        lowFire();
-      } else if (exhaustValue > 30 && exhaustValue < 65) {  //(ktc.readCelsius() > 30 && ktc.readCelsius() < 65)
+        pellet = MainOperation::lowFire(exhaustValue);// Pellet has burn
+      } else if (exhaustValue > 30 &&   < 65) {  //(ktc.readCelsius() > 30 && ktc.readCelsius() < 65)
         warmingUp();
       } else if (exhaustValue >= 65) {  //ktc.readCelsius() < 65
         mainWorking();
@@ -160,18 +194,6 @@ void started() {
       wdt_reset();
     }
   }
-}
-
-void lowFire() {
-  lcd.clear();
-  lcd.setCursor(1, 0);
-  lcd.print("XAMILI ENAUSI");
-  lcd.setCursor(0, 1);
-  lcd.print("KAYSAERIA ");
-  lcd.print(exhaustValue);  //ktc.readCelsius()
-  lcd.print(" C");
-  pellet = false;
-  relay(0, 0, 1, 1);
 }
 
 void warmingUp() {
@@ -308,7 +330,7 @@ void showDataOnLcd(bool open) {
     lcd.setCursor(6, 1);
     lcd.print(firePerCent);
     lcd.print("%");
-    previousMillis[6] = currentTime;  // i=6
+    previousMillis[6] = currentTime;
   }
   if (currentTime - previousMillis[7] >= 2000) {
     lcd.clear();
@@ -318,7 +340,7 @@ void showDataOnLcd(bool open) {
     lcd.print("KAYSAERIA");
     lcd.setCursor(11, 1);
     lcd.print(exhaustValue);
-    previousMillis[7] = currentTime;  // i=7
+    previousMillis[7] = currentTime;
   }
   if (currentTime - previousMillis[8] >= 3000) {
     lcd.clear();
@@ -328,55 +350,7 @@ void showDataOnLcd(bool open) {
     lcd.print("NERO");
     lcd.setCursor(6, 1);
     lcd.print(waterValue);
-    previousMillis[8] = currentTime;  // i=8
-  }
-}
-
-void preFlameOperation() {  //allagi xxronius
-  pellet = true;
-  endOperation = false;
-  unsigned long currentTime = millis();
-  if (millis() - previousTime >= 1000) {
-    time++;
-    if (time >= 14 && time <= 15) {
-      relay(0, 0, 1, 1);
-      lcd.clear();
-      lcd.setCursor(0, 1);
-      lcd.print("AERAS ANOIXTOS 1");
-    } else if (time >= 18 && time <= 20) {
-      relay(0, 0, 1, 1);
-      lcd.clear();
-      lcd.setCursor(0, 1);
-      lcd.print("AERAS ANOIXTOS 2");
-    } else if (time >= 25 && time <= 30) {
-      relay(0, 0, 1, 1);
-      lcd.clear();
-      lcd.setCursor(0, 1);
-      lcd.print("AERAS ANOIXTOS");
-    } else if (time > 40) {
-      relay(1, 1, 1, 1);
-      errorOn();
-    } else {
-      relay(1, 0, 1, 1);
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("ANAFLEKSI ");
-      lcd.print(time);
-      lcd.print(" sec");
-      lcd.setCursor(0, 1);
-      lcd.print("FOTIA ");
-      lcd.print(fireValue);
-    }
-    previousTime = currentTime;
-    wdt_reset();
-  }
-}
-
-void autoManual() {
-  if (digitalRead(13)) {
-    manual = true;
-  } else {
-    manual = false;
+    previousMillis[8] = currentTime;
   }
 }
 
@@ -511,19 +485,6 @@ void menuLcd(const String& first, const String& second, int arrow) {
   lcd.setCursor(0, 1);
   lcd.print(second);
 }
-
-void resetEppromReads() {
-  EEPROM.write(1, 12);
-  EEPROM.write(2, 3);
-  EEPROM.write(3, 15);
-  EEPROM.write(4, 3);
-  EEPROM.write(5, 15);
-  EEPROM.write(6, 2);
-  EEPROM.write(7, 2);  //pellet Init
-  EEPROM.write(8, 20);
-  EEPROM.write(9, 3);
-}
-
 
 void setUpTimesForTimers() {
   standBy[0] = EEPROM.read(1);
@@ -720,7 +681,7 @@ void collectDataFromSensors() {
       open = false;
     }
     preTime = currentTime;
-    autoManual();
+    manual = Usual::autoManual();
     wdt_reset();
   }
 }
