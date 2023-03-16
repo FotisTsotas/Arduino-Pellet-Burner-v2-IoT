@@ -3,18 +3,23 @@
 #include <LCD.h>
 #include <LiquidCrystal_I2C.h>
 #include <LiquidCrystal_SI2C.h>
+#include <avr/wdt.h>
+#include <EEPROM.h>
 
 extern Usual usual;
 extern LiquidCrystal_I2C lcd;
 
-MainOperation::MainOperation() {
+MainOperation::MainOperation(int onOffTimmers, int motorAir, int beginResistor, int motorPellet) {
+  this->onOffTimmers = onOffTimmers;
+  this->motorAir = motorAir;
+  this->beginResistor = beginResistor;
+  this->motorPellet = motorPellet;
   previousTime = millis();
   time = 0;
 }
 
 
 void MainOperation::preFlameOperation(int fireValue, bool sel) {
-  pellet = true;
   endOperation = false;
   unsigned long currentTime = millis();
   if (millis() - previousTime >= 1000) {
@@ -52,6 +57,38 @@ void MainOperation::preFlameOperation(int fireValue, bool sel) {
   }
 }
 
+bool MainOperation::warmingUp(int exhaustValue) {
+  time = 0;
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("ZESTAMA ");
+  lcd.setCursor(0, 1);
+  lcd.print("KAYSAERIA ");
+  lcd.print(exhaustValue);  //ktc.readCelsius()
+  lcd.print(" C");
+  endOperation = true;
+  return endOperation;
+}
+
+
+bool MainOperation::pelletIn(int endTime) {
+  while (endTime >= 0) {
+    usual.relay(1, 1, 0, 1);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("EISAGWGI PELLET");
+    lcd.setCursor(0, 1);
+    lcd.print(endTime);
+    lcd.print(" sec");
+    endTime--;
+    EEPROM.write(0, 0);
+    delay(1000);
+    wdt_reset();
+  }
+  EEPROM.write(0, 1);
+  return;
+}
+
 bool MainOperation::lowFire(float exhaustValue) {
   lcd.clear();
   lcd.setCursor(1, 0);
@@ -61,5 +98,5 @@ bool MainOperation::lowFire(float exhaustValue) {
   lcd.print(exhaustValue);  //ktc.readCelsius()
   lcd.print(" C");
   usual.relay(0, 0, 1, 1);
-  return false;
+  return true;
 }

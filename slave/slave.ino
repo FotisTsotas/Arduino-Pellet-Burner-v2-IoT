@@ -26,6 +26,7 @@
 #include <LiquidCrystal_SI2C.h>
 #include "MainOperation.h"
 #include "Usual.h"
+#include "Timers.h"
 
 #define ONE_WIRE_BUS 5
 #define sel digitalRead(3) == 1
@@ -61,14 +62,12 @@ float waterValue = 0;
 float firePerCent;
 unsigned long previousMillis[13] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };  //number of onOfftimers
 unsigned long previousTime = 0;
-unsigned long pelletInDelayLastTime = 0;
-unsigned long pelletInDelay = 10000;
 unsigned long preTime = 0;
 bool state[10] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 bool open = false;
+bool pellet = false;
 bool manual = false;
 bool error = false;
-bool pellet = false;
 bool MAX = true;
 bool menuOn = false;
 bool endOperation = false;
@@ -83,8 +82,10 @@ MAX6675 ktc(ktcCLK, ktcCS, ktcSO);
 LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
-MainOperation mainOperation;
-Usual usual;
+MainOperation mainOperation(onOffTimmers, motorAir, beginResistor, motorPellet);
+
+Usual usual(onOffTimmers, motorAir, beginResistor, motorPellet);
+Timers timers(motorPellet);
 
 void setup() {
   pinMode(motorAir, OUTPUT);
@@ -96,11 +97,6 @@ void setup() {
   pinMode(sel, INPUT);
   pinMode(down, INPUT);
   relay(0, 1, 1, 1);
-  usual.motorAir = motorAir;
-  usual.beginResistor = beginResistor;
-  usual.motorPellet = motorPellet;
-  usual.onOffTimmers = onOffTimmers;
-  mainOperation.buzz = buzz;
 
   lcd.begin(16, 2);
   sensors.begin();
@@ -109,10 +105,10 @@ void setup() {
   Wire.onRequest(requestEvent);
   wdt_enable(WDTO_2S);
   Usual::resetEppromReads();
-  setUpTimesForTimers();
-  while (!EEPROM.read(0)) {  //need reset button
-    Usual::errorOn(sel, buzz);
-  }
+  // setUpTimesForTimers();
+  // while (!EEPROM.read(0)) {  //need reset button
+  //   Usual::errorOn(sel, buzz);
+  // }
 }
 
 void loop() {
@@ -156,24 +152,23 @@ void mainMode() {
     showDataOnLcd(true);
     collectDataFromSensors();
     relay(0, 0, 1, 0);
-    wdt_reset();
   } else {
     if (!pellet && (exhaustValue < 35 || fireValue > 900)) {
-      pelletIn();
+      initialPellet = 2;// must remove brafore use
+       MainOperation::pelletIn(initialPellet);
+       pellet = true;
     } else {
       started();
+      //  pellet = false;
     }
   }
+  wdt_reset();
 }
 
 
 void started() {
   if (fireValue >= 500 && exhaustValue <= 25) {  // ktc.readCelsius() <= 25
-
-    mainOperation.pellet = pellet;
     mainOperation.preFlameOperation(fireValue, sel);
-    pellet = mainOperation.pellet;
-
   } else {
 
     unsigned long currentTime = millis();
@@ -184,48 +179,22 @@ void started() {
         wdt_reset();
       }
       if (exhaustValue >= 0 && exhaustValue <= 30) {  //ktc.readCelsius() >= 0 && ktc.readCelsius() <= 30
-        pellet = MainOperation::lowFire(exhaustValue);// Pellet has burn
-      } else if (exhaustValue > 30 &&   < 65) {  //(ktc.readCelsius() > 30 && ktc.readCelsius() < 65)
-        warmingUp();
+        MainOperation::lowFire(exhaustValue);// Pellet has burn
+        
+      } else if (exhaustValue > 30 && exhaustValue < 65) {  //(ktc.readCelsius() > 30 && ktc.readCelsius() < 65)
+        digitalWrite(onOffTimmers, HIGH);
+        digitalWrite(motorAir, LOW);
+        digitalWrite(beginResistor, HIGH);
+        mainOperation.warmingUp(exhaustValue);
+        timers.throwingStandBy(EEPROM.read(9),  EEPROM.read(8));
+
       } else if (exhaustValue >= 65) {  //ktc.readCelsius() < 65
         mainWorking();
+
       }
       previousMillis[5] = currentTime;
       wdt_reset();
     }
-  }
-}
-
-void warmingUp() {
-  time = 0;
-  pellet = false;
-  digitalWrite(onOffTimmers, HIGH);
-  digitalWrite(motorAir, LOW);
-  digitalWrite(beginResistor, HIGH);
-  warmingUpTimer();
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("ZESTAMA ");
-  lcd.setCursor(0, 1);
-  lcd.print("KAYSAERIA ");
-  lcd.print(exhaustValue);  //ktc.readCelsius()
-  lcd.print(" C");
-  endOperation = true;
-}
-
-void warmingUpTimer() {
-  unsigned long currentMillis = millis();
-  int i = 1;
-  int onTime = throwing[3] * 1000;
-  int offTime = standBy[3] * 1000;
-  if ((state[i] == HIGH) && (currentMillis - previousMillis[i] >= offTime)) {
-    state[i] = LOW;
-    digitalWrite(motorPellet, LOW);
-    previousMillis[i] = currentMillis;
-  } else if ((state[i] == LOW) && (currentMillis - previousMillis[i] >= onTime)) {
-    state[i] = HIGH;
-    digitalWrite(motorPellet, HIGH);
-    previousMillis[i] = currentMillis;
   }
 }
 
@@ -235,7 +204,8 @@ void mainWorking() {
     digitalWrite(motorAir, LOW);
     digitalWrite(beginResistor, HIGH);
     if (waterValue <= 51 && MAX == true) {
-      highTimer();
+      // timers.throwingStandBy(EEPROM.read(1),  EEPROM.read(2));
+
     } else if (waterValue >= 45 && waterValue < 51) {
       midTimer();
       if (waterValue < 45) { MAX = true; }
@@ -248,7 +218,7 @@ void mainWorking() {
     relay(0, 1, 1, 0);
   }
   endOperation = true;
-  showDataOnLcd(false);
+  // showDataOnLcd(false);
   wdt_reset();
 }
 
@@ -367,24 +337,6 @@ void errorOn() {
   }
 }
 
-void pelletIn() {
-  while (endTime >= 0) {
-    relay(1, 1, 0, 1);
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("EISAGWGI PELLET");
-    lcd.setCursor(0, 1);
-    lcd.print(endTime);
-    lcd.print(" sec");
-    endTime--;
-    EEPROM.write(0, 0);
-    delay(1000);
-    wdt_reset();
-  }
-  pellet = true;
-  EEPROM.write(0, 1);
-}
-
 void closed() {
   unsigned long currentMillis = millis();
   if (currentMillis - previousMillis[9] >= 1000) {
@@ -487,14 +439,14 @@ void menuLcd(const String& first, const String& second, int arrow) {
 }
 
 void setUpTimesForTimers() {
-  standBy[0] = EEPROM.read(1);
+  standBy[0] = EEPROM.read(1);//HIGH STANDBY
   standBy[1] = EEPROM.read(3);
   standBy[2] = EEPROM.read(5);
-  standBy[3] = EEPROM.read(8);
-  throwing[0] = EEPROM.read(2);
+  standBy[3] = EEPROM.read(8);//warming standby
+  throwing[0] = EEPROM.read(2);// HIGH THROW
   throwing[1] = EEPROM.read(4);
   throwing[2] = EEPROM.read(6);
-  throwing[3] = EEPROM.read(9);
+  throwing[3] = EEPROM.read(9);//warming throw
   initialPellet = EEPROM.read(7);
 }
 

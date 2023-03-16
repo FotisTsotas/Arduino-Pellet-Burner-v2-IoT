@@ -5,6 +5,7 @@
 
 class Usual {
 public:
+  Usual(int onOffTimmers, int motorAir, int beginResistor, int motorPellet);
   void relay(bool air, bool resist, bool motorpellet, bool onofftimers);
   static void errorOn(bool sel, int buzz);
   static bool autoManual();
